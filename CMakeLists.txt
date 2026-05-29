@@ -64,3 +64,6 @@ add_test(NAME basic_replay
           $<TARGET_FILE:matching_engine>)
 add_test(NAME verify_all
   COMMAND ${CMAKE_SOURCE_DIR}/tests/verify_tests.sh)
+add_test(NAME market_replay
+  COMMAND ${CMAKE_COMMAND} -E env INPUT_FILE=${CMAKE_SOURCE_DIR}/tests/market.txt
+          $<TARGET_FILE:matching_engine>)
