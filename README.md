@@ -685,22 +685,57 @@ cd build && ctest --output-on-failure
 
 ## CLI usage
 
-### JSON replay (tests)
+### Output modes (JSON vs pretty)
+
+**Default is JSON-only** — one JSON object per line on stdout. No tables unless you opt in.
+
+| Mode | How to enable | stdout |
+|------|----------------|--------|
+| **JSON (default)** | No flag, or `--json` | JSON lines only — used by `verify_tests.sh` / `test_determinism.sh` |
+| **Pretty** | `--pretty`, `-p`, or `MATCHING_ENGINE_PRETTY=1` | JSON line **plus** ASCII tables (Top of Book / Book Depth) |
+
+**Replay file**
 
 ```bash
+# JSON only (default) — best for scripts and diffs
 ./build/matching_engine tests/basic.txt
+./build/matching_engine --json tests/basic.txt
+
+# JSON + human-readable book tables
+./build/matching_engine --pretty tests/basic.txt
+./build/matching_engine -p tests/depth_20.txt
+
+# Same replay via env var
 INPUT_FILE=tests/basic.txt ./build/matching_engine
+INPUT_FILE=tests/basic.txt ./build/matching_engine --pretty
 ```
 
-### Interactive
+**Interactive (stdin)**
 
 ```bash
+# JSON only
 ./build/matching_engine
+
+# JSON + tables after each command
+./build/matching_engine --pretty
 ```
 
-One JSON object per line; Ctrl+D to exit.
+**Environment variable** (same effect as `--pretty`):
 
-### Pretty tables (`--pretty` / `-p`)
+```bash
+MATCHING_ENGINE_PRETTY=1 ./build/matching_engine tests/basic.txt
+MATCHING_ENGINE_PRETTY=1 ./build/matching_engine
+```
+
+Use `--json` to force JSON-only if pretty was enabled via the env var.
+
+**Help**
+
+```bash
+./build/matching_engine --help
+```
+
+### Pretty tables (what you see)
 
 Human-readable **Bid Price | Bid Qty | Ask Price | Ask Qty** (resting liquidity):
 
@@ -709,11 +744,7 @@ Human-readable **Bid Price | Bid Qty | Ask Price | Ask Qty** (resting liquidity)
 | **Top of Book** | One row — best bid and best ask |
 | **Book Depth** | Multiple levels (`query full` = all; else best 10) |
 
-```bash
-./build/matching_engine --pretty tests/basic.txt
-```
-
-Tests use plain JSON (no `--pretty`).
+Automated tests intentionally use **plain JSON** (no `--pretty`) so output is stable for `diff` and golden hashes.
 
 ### JSON commands (quick reference)
 
@@ -744,12 +775,6 @@ Lines starting with `#` in test files are comments.
 ```
 
 Hot-path only (no JSON): place+cancel, IOC 1-lot match, post-only reject — reports min / p50 / p99 / avg ns.
-
-### Help
-
-```bash
-./build/matching_engine --help
-```
 
 ---
 
