@@ -98,6 +98,7 @@ IoLineResult IoAdapter::handle_line(std::string line, bool pretty) {
     std::string query_type;
     DisplayContext disp_ctx{};
     disp_ctx.ladder_depth = 10;
+    bool named_market = false;
 
     try {
         if (line.empty() || line[0] == '#') {
@@ -112,8 +113,10 @@ IoLineResult IoAdapter::handle_line(std::string line, bool pretty) {
         cmd = json::value_to<std::string>(obj.at("cmd"));
         disp_ctx.command = cmd;
 
-        bool named_market = false;
         const std::string symbol = parse_symbol(obj, named_market);
+        if (named_market) {
+            disp_ctx.symbol = symbol;
+        }
 
         if (cmd == "order") {
             PlaceRequest req{};
@@ -186,6 +189,7 @@ IoLineResult IoAdapter::handle_line(std::string line, bool pretty) {
                 }
                 append_router_meta(out, routed);
             } else if (query_type == "events") {
+                disp_ctx.show_book_tables = false;
                 if (!named_market) {
                     out["ok"] = false;
                     out["error"] = "symbol_required";
