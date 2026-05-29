@@ -611,7 +611,7 @@ matchingEngine/
 ### 1. Clone
 
 ```bash
-git clone https://github.com/parecejiit/matchingEngine.git matchingEngine
+git clone https://github.com/parecejiit/MatchingEngine.git matchingEngine
 cd matchingEngine
 ```
 
