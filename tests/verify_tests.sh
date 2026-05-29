@@ -82,4 +82,49 @@ assert_contains "$out" '"ok":false' "query after cancel fails"
 assert_contains "$out" '"fills":[]' "no liquidity after cancel"
 echo "OK cancel_during_match"
 
+if [[ -x "$ROOT/tests/gen_depth_tests.sh" ]]; then
+  "$ROOT/tests/gen_depth_tests.sh"
+fi
+
+count_json_levels() {
+  echo "$1" | grep -c '"level":' || true
+}
+
+echo "==> depth_10"
+out=$(run "$ROOT/tests/depth_10.txt")
+n=$(count_json_levels "$out")
+if [[ "$n" -lt 20 ]]; then
+  echo "FAIL: depth_10 expected >= 20 level entries, got $n"
+  exit 1
+fi
+assert_contains "$out" '"bid_levels"' "bid_levels in response"
+assert_contains "$out" '"ask_levels"' "ask_levels in response"
+echo "OK depth_10 ($n level fields)"
+
+echo "==> depth_20"
+out=$(run "$ROOT/tests/depth_20.txt")
+n=$(count_json_levels "$out")
+if [[ "$n" -lt 40 ]]; then
+  echo "FAIL: depth_20 expected >= 40 level entries, got $n"
+  exit 1
+fi
+echo "OK depth_20 ($n level fields)"
+
+echo "==> depth_50"
+out=$(run "$ROOT/tests/depth_50.txt")
+n=$(count_json_levels "$out")
+if [[ "$n" -lt 100 ]]; then
+  echo "FAIL: depth_50 expected >= 100 level entries, got $n"
+  exit 1
+fi
+assert_contains "$out" '"level":50' "level 50 on book"
+echo "OK depth_50 ($n level fields)"
+
+echo "==> determinism (replay identity)"
+if [[ -x "$ROOT/tests/test_determinism.sh" ]]; then
+  ME_BIN="$BIN" "$ROOT/tests/test_determinism.sh"
+else
+  echo "SKIP test_determinism.sh (not executable)"
+fi
+
 echo "All verification checks passed."

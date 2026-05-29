@@ -26,13 +26,14 @@ alwaysApply: true
 ## Matching correctness
 
 - Price-time priority; partial GTC rests keep queue position.
-- Self-trade: **cancel newest (taker)** — document in WRITEUP.
+- Self-trade: **cancel newest (taker)** — document in README.md.
 - Deterministic: monotonic `order_id` / `timestamp` from engine only.
 
 ## Build
 
 - CMake + vcpkg: `boost-asio`, `boost-json`, `boost-signals2`.
-- Release: `-O3` (or `-O2` if size matters).
+- Release: `-O3` (MSVC `/O2`) via `cmake/MeDeterministic.cmake` — never `-Ofast` / `-ffast-math`; use `-fno-fast-math`, `-ffp-contract=off`, `/fp:strict`.
+- Optional `-DME_DISABLE_COMPILER_OPTIMIZATION=ON` for `-O0` golden replay vs optimized binary.
 
 ## When adding code
 
