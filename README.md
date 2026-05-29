@@ -1,6 +1,6 @@
 # Matching Engine
 
-**Continuous limit order book** (C++20) for the Infinite Worlds exchange take-home: **Part 1** single-market matching; **Part 2** multi-market routing (BTC, CL, SILVER) with per-symbol engines, event streams, and throughput benchmarks.
+**Continuous limit order book** (C++20) for the Infinite Worlds exchange take-home: **Part 1** single-market matching; **Part 2** multi-market routing (BTC, CL, SILVER); **Part 3** distributed-exchange design (Illinois / Tokyo, design only).
 
 ---
 
@@ -8,13 +8,14 @@
 
 1. [Assignment coverage](#assignment-coverage)
 2. [Part 2 — Multiple markets](#part-2--multiple-markets-and-throughput) — design analysis, implementation, benchmarks
-3. [Design approach](#design-approach) — architecture, latency, determinism, data structures
-4. [Production deployment](#production-deployment-and-roadmap) — Docker, Kubernetes, prod-ready changes
-5. [Project layout](#project-layout)
-6. [Clone, dependencies, and build](#clone-and-install-dependencies)
-7. [Run tests](#run-tests)
-8. [CLI and benchmark](#cli-usage)
-9. [Contributor notes](#contributor-notes)
+3. [Part 3 — Distributed exchange](#part-3--distributed-exchange-design-only) — Illinois / Tokyo, routing, WAL, failover
+4. [Design approach](#design-approach) — architecture, latency, determinism, data structures
+5. [Production deployment](#production-deployment-and-roadmap) — Docker, Kubernetes, prod-ready changes
+6. [Project layout](#project-layout)
+7. [Clone, dependencies, and build](#clone-and-install-dependencies)
+8. [Run tests](#run-tests)
+9. [CLI and benchmark](#cli-usage)
+10. [Contributor notes](#contributor-notes)
 
 ---
 
@@ -36,8 +37,9 @@
 | **Deterministic** fills and book state | Yes — `test_determinism.sh` (replay `cmp`, golden SHA256, 8× stress loop) |
 | Single-threaded engine + scripted CLI | Yes |
 | **Part 2:** multiple independent markets | Yes — see [Part 2](#part-2--multiple-markets-and-throughput) |
+| **Part 3:** distributed two-region design | Yes — see [Part 3](#part-3--distributed-exchange-design-only) (design only, no code) |
 
-**Still out of scope:** authentication, durable disk WAL, recovery, collateral, HTTP/WebSocket server, kernel bypass.
+**Still out of scope (implementation):** authentication, durable disk WAL, cross-region failover, collateral, HTTP/WebSocket server, kernel bypass.
 
 ---
 
@@ -166,6 +168,180 @@ Output includes **throughput=… ops/s** per scenario plus `markets_active=3` fo
 - **Disk WAL** + snapshot per symbol  
 - Gateway routing by `symbol` with backpressure metrics  
 - Cross-market **risk** as a separate service (not in matcher)  
+
+---
+
+## Part 3 — Distributed exchange (design only)
+
+Part 3 is **optional and design-only** (no additional code in this repo). It extends Parts 1–2 to a **two-region** exchange (e.g. **Illinois** and **Tokyo**), where **each market is owned by exactly one region**. Example: **BTC** is matched only in Tokyo; a client in **New York** sends orders to a local gateway, but matching happens on the Tokyo engine.
+
+### Design goals (unchanged from Parts 1–2)
+
+- **Ultra-low latency** on the match path (pools, single thread, no JSON in the engine).
+- **Deterministic** book and fills **per market** — same command stream → same `seq` and events.
+- **Explicit tradeoffs** — geography sets latency floors; do not pretend WAN is “HFT.”
+
+### Mental model
+
+```mermaid
+flowchart LR
+  NY[NY client]
+  GW_NY[Gateway NY]
+  ENG[Matcher Tokyo BTC]
+  WAL[WAL plus market seq]
+  PUB[Market data fan-out]
+  NY --> GW_NY
+  GW_NY -->|replicate command| ENG
+  ENG --> WAL
+  ENG --> PUB
+  PUB -->|async| GW_NY
+```
+
+- **Illinois** and **Tokyo** each run matchers for **their** symbols only.
+- The **owning-region engine** is the **source of truth** for that symbol.
+- **Determinism** is **per symbol** (as in Part 2). There is **no global order** across BTC and CL, and **no global order across regions** — only **per-market `event_seq`**.
+
+---
+
+### 1. Order routing and acknowledgement
+
+#### Path
+
+1. **NY gateway** receives the order → validates (auth, risk, symbol → **home region = Tokyo** for BTC).
+2. Gateway assigns **`client_order_id`** (idempotency) and forwards a **binary command** to Tokyo (leased line, MPLS, or overlay — not JSON on the hot path).
+3. **Tokyo matcher** appends to **WAL**, runs `place_order` on **one thread**, emits **`market_seq`** + fills + book deltas.
+4. **Ack** returns to NY: at minimum **accepted** (resting) or **rejected**; optionally **filled** if the match completes in the same processing hop.
+
+#### What the New York client sees
+
+| Stage | Client-visible state | Typical extra latency |
+|-------|----------------------|------------------------|
+| **Local accept** (optional) | “Received, routed to Tokyo” — not a match guarantee | µs–low ms (gateway only) |
+| **Engine ack** | Resting / rejected / partial + rest | **RTT(NY ↔ Tokyo)** + match time |
+| **Fill / trade** | Final size, price, `trade_id` | Same as ack if synchronous; else + fan-out delay |
+| **Market data** | Book update | Often **after** ack, via async multicast |
+
+#### Latency floors (NY client → BTC in Tokyo)
+
+| Factor | Order of magnitude | Role |
+|--------|-------------------|------|
+| **Physics (fiber)** | ~60–80 ms one-way NY–Tokyo; **~120–160 ms RTT** | Hard floor for synchronous “did I trade?” from NY |
+| **Matcher CPU** | sub-µs–low µs per op (Part 1/2 benchmark) | Negligible vs WAN for remote clients |
+| **Gateway** | µs–low ms if lean | Serialization, risk; avoid TLS on ultra-low-latency trust zone |
+| **Colocation** | Can approach Part 1 bench | Client or gateway in **same metro as engine** |
+
+**Easy:** regional gateway, symbol → region routing table, async market data to remote POPs.  
+**Hard:** beating speed of light for a NY API user trading Tokyo BTC.  
+**Tradeoff:** **ack at engine** (truth, higher RTT) vs **early ack at gateway** (lower perceived latency, higher cancel/reject ambiguity).
+
+---
+
+### 2. Determinism and replay (crash recovery + cross-region follower)
+
+#### Log shape (extends Part 2 `MarketEvent`)
+
+Per **owned market**, an append-only **command log** and derived **event log**:
+
+```text
+(market, seq, ingest_ts, command_bytes) → events: place | fill | cancel | book_delta ...
+```
+
+| Field | Rule |
+|-------|------|
+| **`seq`** | Single writer in the owning region; strictly monotonic on commit |
+| **Snapshot** | Periodic book image + `last_seq` for fast recovery |
+| **Recovery** | Load snapshot, replay `seq > last_seq` in order → identical book (same invariant as `test_determinism.sh`) |
+
+#### Replica in another region (e.g. Illinois follows Tokyo BTC)
+
+- **Not** a second matcher writer — a **follower** consumes the **committed** event stream (Kafka, Pulsar, or dedicated replication).
+- Follower builds a **read-only book** for DR display, delayed risk, or regulatory copy; lag = replication delay (ms–s), not matcher CPU.
+- If follower state diverges from replay → halt and resync from snapshot (bug or corruption).
+
+#### Ultra-low-latency friendly logging
+
+- Matcher thread: append to a **lock-free ring** → **async WAL writer** (batched `writev`, dedicated NVMe).
+- **Do not `fsync` on the hot path** — group commit every 1–5 ms or by volume (policy defines RPO).
+- **Binary commands** on the wire; JSON only at the gateway edge (Part 1 CLI stays a dev tool).
+
+**Easy:** per-market `seq` + ring + async disk (upgrade Part 2 in-memory vector to segmented WAL).  
+**Hard:** zero data loss **and** sub-ms cross-region replica **without** blocking the matcher.  
+**Tradeoff:** **async replication** (faster, small RPO window) vs **sync replicate before ack** (slower, stronger durability).
+
+---
+
+### 3. Failure modes (link degrade, region down, takeover)
+
+#### Link degradation (NY ↔ Tokyo)
+
+- Tokyo **ingress queue** backs up; NY gateway applies **backpressure** (reject new orders, prioritize cancels).
+- **Idempotent `client_order_id`** at the gateway so client retries do not double-place.
+- NY may show **pending** until TTL — **do not** infer match outcome locally.
+
+#### Tokyo (owner) down — BTC unavailable
+
+| Option | Feasible? | Risk |
+|--------|-----------|------|
+| **Fail closed** | Yes | No BTC trading until Tokyo returns — **safest default** |
+| **Illinois promotes to primary** | Only with replicated WAL + **consensus** + **fencing** of old primary | **Split-brain** if both accept orders → nondeterministic / double fills |
+| **Read-only in Illinois** | Yes | Queries from last replicated state; **no new matches** |
+
+**Takeover is hard** because **exactly one writer per market** is the determinism invariant. Safe promotion requires Raft (or equivalent), replay of **committed** log only, and **STONITH** / fencing of the old matcher.
+
+**Push back on:** “automatic failover in seconds” without years of ops tooling — prefer **fail closed** + manual runbook at this scale.
+
+#### Illinois down while Tokyo owns BTC
+
+- **Easy:** BTC matching unaffected.
+- NY still pays RTT to Tokyo; optional **redundant Tokyo ingress** paths.
+
+---
+
+### 4. What would change in Part 1 and Part 2 if distributed from day one
+
+| Parts 1–2 today | Distributed-from-day-one |
+|-----------------|---------------------------|
+| `order_id` per engine | **`(market_id, engine_epoch, local_id)`** — bump epoch on failover promotion |
+| JSON CLI / replay files | **Binary `Place` / `Cancel` on the wire**; JSON only at gateway |
+| In-memory `MarketEvent` vector | **Durable segmented WAL** + snapshot API per shard |
+| In-process `MarketRouter` | **Gateway router** + **remote stub** to home region |
+| No client order id | **Idempotency key** end-to-end |
+| Engine `timestamp` on fills | **`match_seq` for events**; wall clock only on gateway (never in matcher) |
+| Signals2 optional on cold path | **No fan-out on matcher thread** — publisher reads ring |
+| `test_determinism.sh` byte replay | **WAL segment replay** + chaos tests (duplicate cmd, partition) |
+
+**Keep unchanged:** one thread per market, order/level pools, intrusive FIFO, integer ticks, hot/cold split — maps to **one pinned process per shard in one region**.
+
+---
+
+### 5. Summary — easy, hard, tradeoffs
+
+**Non-negotiables**
+
+1. **One writer per market at a time** (Tokyo for BTC).
+2. **Total order per market** via committed **`seq`**.
+3. Matcher does **not** block on WAN for replication; ack policy defines when the client sees “accepted” relative to local WAL commit.
+
+**Easy wins**
+
+- Symbol → home region routing.
+- Per-market WAL + deterministic replay.
+- Idempotent gateway.
+- Async market data to remote gateways.
+
+**Hard problems**
+
+- Cross-region **active-active matching** on one symbol.
+- **Sub-ms global consistency** across regions.
+- **Automatic failover** without split brain.
+
+**Tradeoffs to advocate**
+
+| Prefer | Over |
+|--------|------|
+| Determinism + single-writer | Multi-region active matching on one book |
+| Honest RTT in ack SLA | Hidden async risk at the gateway |
+| Fail closed | Automatic cross-region takeover without consensus |
 
 ---
 
@@ -897,4 +1073,4 @@ Coding standards for this repo: `.cursor/rules/matching-engine-performance.mdc` 
 
 ## Submission
 
-Built as the Infinite Worlds exchange take-home (Part 1): git repository + this **README** as the complete design, operations guide, and production roadmap.
+Built as the Infinite Worlds exchange take-home: git repository + this **README** as the complete design (Parts 1–3), operations guide, and production roadmap.
