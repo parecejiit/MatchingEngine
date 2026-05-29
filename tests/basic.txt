@@ -1,0 +1,11 @@
+# Price-time, partial fill, IOC, self-trade, cancel
+{"cmd": "order", "account_id": 1, "side": "buy", "price": 100.0, "size": 10, "tif": "GTC"}
+{"cmd": "order", "account_id": 2, "side": "sell", "price": 101.0, "size": 10, "tif": "GTC"}
+{"cmd": "order", "account_id": 3, "side": "buy", "price": 101.0, "size": 5, "tif": "GTC"}
+{"cmd": "query", "type": "top"}
+{"cmd": "order", "account_id": 4, "side": "sell", "price": 100.0, "size": 7, "tif": "IOC"}
+{"cmd": "query", "type": "full"}
+{"cmd": "cancel", "order_id": 1}
+{"cmd": "query", "type": "order", "order_id": 1}
+{"cmd": "order", "account_id": 2, "side": "buy", "price": 101.0, "size": 5, "tif": "GTC"}
+{"cmd": "order", "account_id": 2, "side": "sell", "price": 101.0, "size": 5, "tif": "GTC"}

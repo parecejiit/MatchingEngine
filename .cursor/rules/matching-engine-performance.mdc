@@ -1,0 +1,42 @@
+---
+description: Ultra-low-latency matching engine — architecture and coding standards
+alwaysApply: true
+---
+
+# Matching Engine — Performance & Design Rules
+
+## Non-negotiables
+
+1. **Ultra-low latency / HFT-style**: Optimize the order→match→fill path first.
+2. **Zero copy on hot path**: No `std::string`, `std::vector` growth, JSON, or struct copies inside matching. Use indices, pointers, and pre-sized buffers only.
+3. **Move semantics**: Pass orders as `OrderHandle&&` / rvalue requests; delete copy on hot types.
+4. **C++20+** only (`std::span`, `constexpr`, designated init where helpful).
+5. **Single-threaded Boost.Asio**: One `io_context` (concurrency hint 1). No `std::thread`, mutexes, or atomics in the engine. Async I/O posts work back to the same executor.
+6. **Pre-allocated pools**: Orders and price levels from fixed pools; hot path must not call `new`/`delete` or container reallocation.
+7. **Fastest practical path**: Intrusive FIFO per level, cached best bid/ask, `int64_t` price ticks, cold/hot split (JSON only in I/O adapter).
+
+## Hot vs cold path
+
+| Hot (engine) | Cold (I/O adapter / CLI) |
+|--------------|---------------------------|
+| match, cancel, book mutation | JSON parse/serialize |
+| fill buffer (fixed array) | Boost.Signals2 fan-out optional |
+| pool allocate/free | stdin/stdout via Asio |
+
+## Matching correctness
+
+- Price-time priority; partial GTC rests keep queue position.
+- Self-trade: **cancel newest (taker)** — document in WRITEUP.
+- Deterministic: monotonic `order_id` / `timestamp` from engine only.
+
+## Build
+
+- CMake + vcpkg: `boost-asio`, `boost-json`, `boost-signals2`.
+- Release: `-O3` (or `-O2` if size matters).
+
+## When adding code
+
+- Ask: “Does this allocate or copy on the hot path?” If yes, move to cold path or pre-allocate at startup.
+- Prefer `[[nodiscard]]`, `noexcept` on hot helpers.
+- Tests must cover: price-time, partial fill, IOC, self-trade, cancel resting order, post-only.
+- Benchmark hot path via `me_benchmark` (no JSON); keep CLI on cold path.

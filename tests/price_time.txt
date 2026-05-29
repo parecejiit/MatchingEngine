@@ -1,0 +1,4 @@
+# Two bids same price; sell should hit earlier order first (FIFO)
+{"cmd": "order", "account_id": 1, "side": "buy", "price": 100.0, "size": 5, "tif": "GTC"}
+{"cmd": "order", "account_id": 2, "side": "buy", "price": 100.0, "size": 5, "tif": "GTC"}
+{"cmd": "order", "account_id": 3, "side": "sell", "price": 100.0, "size": 10, "tif": "IOC"}

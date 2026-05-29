@@ -1,0 +1,6 @@
+# IOC: no rest when no match; partial then discard remainder
+{"cmd": "order", "account_id": 1, "side": "sell", "price": 105.0, "size": 5, "tif": "GTC"}
+{"cmd": "order", "account_id": 2, "side": "buy", "price": 104.0, "size": 3, "tif": "IOC"}
+{"cmd": "order", "account_id": 3, "side": "buy", "price": 105.0, "size": 10, "tif": "GTC"}
+{"cmd": "order", "account_id": 4, "side": "sell", "price": 105.0, "size": 20, "tif": "IOC"}
+{"cmd": "query", "type": "order", "order_id": 4}

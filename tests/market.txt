@@ -1,0 +1,10 @@
+# Market orders: omit price or use null; buy and sell sides
+{"cmd": "order", "account_id": 1, "side": "sell", "price": 100.0, "size": 10, "tif": "GTC"}
+# Market buy (no price field) — takes liquidity
+{"cmd": "order", "account_id": 2, "side": "buy", "size": 4, "tif": "IOC"}
+# Market buy with price null — no match when book empty on ask
+{"cmd": "order", "account_id": 3, "side": "buy", "price": null, "size": 5, "tif": "IOC"}
+# Rest bid for market sell test
+{"cmd": "order", "account_id": 4, "side": "buy", "price": 99.0, "size": 8, "tif": "GTC"}
+# Market sell (no price) — hits best bid
+{"cmd": "order", "account_id": 5, "side": "sell", "size": 6, "tif": "IOC"}

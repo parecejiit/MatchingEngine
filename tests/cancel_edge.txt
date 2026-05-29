@@ -1,0 +1,7 @@
+# Cancel resting remainder after partial; cancel unknown id
+{"cmd": "order", "account_id": 1, "side": "buy", "price": 100.0, "size": 10, "tif": "GTC"}
+{"cmd": "order", "account_id": 2, "side": "sell", "price": 100.0, "size": 4, "tif": "IOC"}
+{"cmd": "cancel", "order_id": 1}
+{"cmd": "query", "type": "order", "order_id": 1}
+{"cmd": "cancel", "order_id": 9999}
+{"cmd": "query", "type": "top"}

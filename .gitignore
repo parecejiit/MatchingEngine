@@ -1,0 +1,13 @@
+build/
+vcpkg_installed/
+.vscode/
+.idea/
+*.o
+*.d
+.DS_Store
+
+# vcpkg clone artifacts (keep vcpkg.json; clone/bootstrap locally)
+vcpkg/buildtrees/
+vcpkg/packages/
+vcpkg/downloads/
+vcpkg/installed/

@@ -1,0 +1,9 @@
+{
+  "name": "matching-engine",
+  "version-string": "0.2.0",
+  "dependencies": [
+    "boost-asio",
+    "boost-json",
+    "boost-signals2"
+  ]
+}
