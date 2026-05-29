@@ -159,13 +159,41 @@ HotResult MatchingEngine::query_order(uint64_t order_id) noexcept {
     return out;
 }
 
+std::vector<MatchingEngine::BookOrderRow> MatchingEngine::book_orders() {
+    std::vector<BookOrderRow> rows;
+    for (Side side : {Side::Buy, Side::Sell}) {
+        uint32_t cur = book_.best_level(side);
+        std::size_t level_rank = 1;
+        while (cur != INVALID_INDEX) {
+            const PriceLevel* lvl = book_.level(cur);
+            if (!lvl) break;
+            std::size_t pos = 0;
+            uint32_t n = lvl->head;
+            while (n != INVALID_INDEX) {
+                if (const OrderSlot* s = book_.slot(n)) {
+                    rows.push_back(BookOrderRow{s->order.order_id, s->order.account_id, s->order.side,
+                                                 s->order.price_ticks, s->order.remaining,
+                                                 s->order.timestamp, pos, level_rank});
+                    ++pos;
+                    n = s->next;
+                } else break;
+            }
+            ++level_rank;
+            cur = lvl->price_next;
+        }
+    }
+    return rows;
+}
+
 std::vector<MatchingEngine::DepthLevel> MatchingEngine::depth_snapshot(Side side) {
     std::vector<DepthLevel> out;
     uint32_t cur = book_.best_level(side);
+    std::size_t level_rank = 1;
     while (cur != INVALID_INDEX) {
         const PriceLevel* lvl = book_.level(cur);
         if (!lvl) break;
         DepthLevel d{};
+        d.level_rank = level_rank++;
         d.price_ticks = lvl->price_ticks;
         uint32_t n = lvl->head;
         while (n != INVALID_INDEX) {

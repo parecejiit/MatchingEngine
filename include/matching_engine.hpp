@@ -65,8 +65,22 @@ public:
         int64_t price_ticks{0};
         uint64_t total_size{0};
         std::size_t order_count{0};
+        std::size_t level_rank{0}; // 1 = best price on side
     };
     [[nodiscard]] std::vector<DepthLevel> depth_snapshot(Side side);
+
+    // Cold path: resting orders for CLI display (price-time order per level).
+    struct BookOrderRow {
+        uint64_t order_id{0};
+        uint64_t account_id{0};
+        Side side{Side::Buy};
+        int64_t price_ticks{0};
+        uint64_t remaining{0};
+        uint64_t timestamp{0};
+        std::size_t queue_position{0};
+        std::size_t price_level{0}; // 1 = best bid / best ask
+    };
+    [[nodiscard]] std::vector<BookOrderRow> book_orders();
 };
 
 } // namespace me

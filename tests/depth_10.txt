@@ -1,0 +1,23 @@
+# 10 bid levels + 10 ask levels (1 lot each, GTC)
+{"cmd":"order","account_id":1,"side":"buy","price":100.00,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":2,"side":"buy","price":99.99,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":3,"side":"buy","price":99.98,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":4,"side":"buy","price":99.97,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":5,"side":"buy","price":99.96,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":6,"side":"buy","price":99.95,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":7,"side":"buy","price":99.94,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":8,"side":"buy","price":99.93,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":9,"side":"buy","price":99.92,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":10,"side":"buy","price":99.91,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1000,"side":"sell","price":100.50,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1001,"side":"sell","price":100.51,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1002,"side":"sell","price":100.52,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1003,"side":"sell","price":100.53,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1004,"side":"sell","price":100.54,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1005,"side":"sell","price":100.55,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1006,"side":"sell","price":100.56,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1007,"side":"sell","price":100.57,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1008,"side":"sell","price":100.58,"size":1,"tif":"GTC"}
+{"cmd":"order","account_id":1009,"side":"sell","price":100.59,"size":1,"tif":"GTC"}
+{"cmd":"query","type":"top"}
+{"cmd":"query","type":"full"}

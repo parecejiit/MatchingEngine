@@ -1,4 +1,5 @@
 build/
+build-verify/
 vcpkg_installed/
 .vscode/
 .idea/

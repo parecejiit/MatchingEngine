@@ -4,6 +4,7 @@
   "dependencies": [
     "boost-asio",
     "boost-json",
-    "boost-signals2"
+    "boost-signals2",
+    "tabulate"
   ]
 }

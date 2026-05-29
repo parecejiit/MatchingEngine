@@ -1,0 +1,25 @@
+# Mixed event stream for determinism replay: layered book, partials, IOC, market,
+# post-only, cancel/query, self-trade, pool reuse after cancels.
+{"cmd": "order", "account_id": 10, "side": "buy", "price": 100.0, "size": 5, "tif": "GTC"}
+{"cmd": "order", "account_id": 11, "side": "buy", "price": 100.0, "size": 5, "tif": "GTC"}
+{"cmd": "order", "account_id": 12, "side": "buy", "price": 99.5, "size": 3, "tif": "GTC"}
+{"cmd": "order", "account_id": 20, "side": "sell", "price": 101.0, "size": 4, "tif": "GTC"}
+{"cmd": "order", "account_id": 21, "side": "sell", "price": 101.5, "size": 6, "tif": "GTC"}
+{"cmd": "query", "type": "top"}
+{"cmd": "order", "account_id": 30, "side": "sell", "price": 100.0, "size": 7, "tif": "IOC"}
+{"cmd": "query", "type": "order", "order_id": 1}
+{"cmd": "order", "account_id": 31, "side": "buy", "price": 101.0, "size": 2, "tif": "GTC", "post_only": true}
+{"cmd": "order", "account_id": 32, "side": "buy", "price": 101.5, "size": 10, "tif": "GTC", "post_only": true}
+{"cmd": "order", "account_id": 33, "side": "sell", "price": 99.5, "size": 1, "tif": "IOC"}
+{"cmd": "query", "type": "full"}
+{"cmd": "order", "account_id": 40, "side": "buy", "size": 3, "tif": "IOC"}
+{"cmd": "order", "account_id": 41, "side": "sell", "price": 100.0, "size": 4, "tif": "GTC"}
+{"cmd": "cancel", "order_id": 5}
+{"cmd": "order", "account_id": 42, "side": "buy", "price": 100.0, "size": 4, "tif": "GTC"}
+{"cmd": "order", "account_id": 43, "side": "sell", "price": 100.0, "size": 4, "tif": "GTC"}
+{"cmd": "order", "account_id": 44, "side": "buy", "price": 100.0, "size": 4, "tif": "GTC"}
+{"cmd": "order", "account_id": 44, "side": "sell", "price": 100.0, "size": 4, "tif": "GTC"}
+{"cmd": "cancel", "order_id": 99}
+{"cmd": "query", "type": "order", "order_id": 12}
+{"cmd": "order", "account_id": 50, "side": "sell", "price": null, "size": 2, "tif": "IOC"}
+{"cmd": "query", "type": "top"}
