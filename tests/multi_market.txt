@@ -1,0 +1,10 @@
+# Part 2: independent markets BTC, CL, SILVER — same order_id space per symbol
+{"cmd": "order", "symbol": "BTC", "account_id": 1, "side": "buy", "price": 50000.0, "size": 1, "tif": "GTC"}
+{"cmd": "order", "symbol": "CL", "account_id": 1, "side": "buy", "price": 75.0, "size": 2, "tif": "GTC"}
+{"cmd": "order", "symbol": "SILVER", "account_id": 1, "side": "sell", "price": 24.0, "size": 3, "tif": "GTC"}
+{"cmd": "query", "symbol": "BTC", "type": "top"}
+{"cmd": "query", "symbol": "CL", "type": "top"}
+{"cmd": "query", "symbol": "SILVER", "type": "top"}
+{"cmd": "order", "symbol": "BTC", "account_id": 2, "side": "sell", "price": 50000.0, "size": 1, "tif": "IOC"}
+{"cmd": "query", "symbol": "CL", "type": "top"}
+{"cmd": "query", "symbol": "BTC", "type": "events", "from_seq": 1, "limit": 20}

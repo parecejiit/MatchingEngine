@@ -1,4 +1,5 @@
 #include "benchmark_runner.hpp"
+#include "market_router.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -59,7 +60,6 @@ static void bench_place_rest_cancel(MatchingEngine& eng, std::uint64_t n,
 }
 
 static void bench_match_ioc(MatchingEngine& eng, std::uint64_t n, std::vector<Sample>& out) {
-    // Seed book once outside timed region.
     (void)eng.place_order(PlaceRequest{.account_id = 10, .side = Side::Sell, .limit_ticks = price_to_ticks(100.0),
                                        .size = 1'000'000, .tif = TimeInForce::GTC});
     out.reserve(n);
@@ -88,12 +88,38 @@ static void bench_post_only_reject(MatchingEngine& eng, std::uint64_t n,
     }
 }
 
+static double ops_per_sec(const BenchmarkReport& r) {
+    if (r.total_ns <= 0) return 0;
+    return static_cast<double>(r.iterations) * 1e9 / r.total_ns;
+}
+
+static void bench_router_round_robin(MarketRouter& router, std::uint64_t n,
+                                     std::vector<Sample>& out) {
+    static constexpr const char* kSymbols[] = {"BTC", "CL", "SILVER"};
+    out.reserve(n);
+    for (std::uint64_t i = 0; i < n; ++i) {
+        const char* sym = kSymbols[i % 3];
+        const auto t0 = Clock::now();
+        PlaceRequest req{};
+        req.account_id = 1 + (i % 8);
+        req.side = (i % 2 == 0) ? Side::Buy : Side::Sell;
+        req.limit_ticks = price_to_ticks(100.0 + static_cast<double>(i % 5));
+        req.size = 1;
+        req.tif = TimeInForce::GTC;
+        RoutedResult rr = router.place_order(sym, std::move(req));
+        (void)router.cancel_order(sym, rr.hot.placed_order_id);
+        const auto t1 = Clock::now();
+        out.push_back({to_ns(t1 - t0)});
+    }
+}
+
 static std::string format_report(const BenchmarkReport& r) {
     std::ostringstream os;
     os << std::fixed << std::setprecision(1);
     os << r.name << "  n=" << r.iterations << "  min=" << r.min_ns << "ns"
        << "  p50=" << r.p50_ns << "ns  p99=" << r.p99_ns << "ns  max=" << r.max_ns << "ns"
-       << "  avg=" << (r.total_ns / static_cast<double>(r.iterations)) << "ns";
+       << "  avg=" << (r.total_ns / static_cast<double>(r.iterations)) << "ns"
+       << "  throughput=" << static_cast<std::uint64_t>(ops_per_sec(r)) << " ops/s";
     return os.str();
 }
 
@@ -107,19 +133,27 @@ std::string run_benchmarks(std::uint64_t iterations) {
         MatchingEngine eng;
         std::vector<Sample> samples;
         bench_place_rest_cancel(eng, iterations, samples);
-        report << format_report(summarize("place+cancel", iterations, samples)) << '\n';
+        report << format_report(summarize("single_market place+cancel", iterations, samples)) << '\n';
     }
     {
         MatchingEngine eng;
         std::vector<Sample> samples;
         bench_match_ioc(eng, iterations, samples);
-        report << format_report(summarize("IOC match 1 lot", iterations, samples)) << '\n';
+        report << format_report(summarize("single_market IOC match 1 lot", iterations, samples)) << '\n';
     }
     {
         MatchingEngine eng;
         std::vector<Sample> samples;
         bench_post_only_reject(eng, iterations, samples);
-        report << format_report(summarize("post-only reject", iterations, samples)) << '\n';
+        report << format_report(summarize("single_market post-only reject", iterations, samples)) << '\n';
+    }
+    {
+        MarketRouter router;
+        std::vector<Sample> samples;
+        bench_router_round_robin(router, iterations, samples);
+        report << format_report(summarize("multi_market BTC/CL/SILVER place+cancel", iterations, samples))
+               << '\n';
+        report << "markets_active=" << router.market_count() << '\n';
     }
     return report.str();
 }

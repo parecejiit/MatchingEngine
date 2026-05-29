@@ -55,6 +55,28 @@ Table make_book_table(MatchingEngine& engine, std::size_t max_levels, bool show_
     return t;
 }
 
+Table make_events_table(const json::array& events) {
+    Table t;
+    t.format().font_style({tabulate::FontStyle::bold});
+    t.add_row({"Seq", "Kind", "OK", "Order", "Maker", "Taker", "Size", "Price ticks"});
+    for (const json::value& v : events) {
+        const json::object& e = v.as_object();
+        std::string order_id = e.contains("order_id") ? std::to_string(e.at("order_id").as_uint64()) : "";
+        std::string maker = e.contains("maker_order_id") ? std::to_string(e.at("maker_order_id").as_uint64()) : "";
+        std::string taker = e.contains("taker_order_id") ? std::to_string(e.at("taker_order_id").as_uint64()) : "";
+        std::string size = e.contains("size") ? std::to_string(e.at("size").as_uint64()) : "";
+        std::string px =
+            e.contains("price_ticks") ? std::to_string(e.at("price_ticks").as_int64()) : "";
+        t.add_row({std::to_string(e.at("seq").as_uint64()),
+                   json::value_to<std::string>(e.at("kind")),
+                   e.at("ok").as_bool() ? "yes" : "no", order_id, maker, taker, size, px});
+    }
+    if (events.empty()) {
+        t.add_row({"—", "—", "—", "—", "—", "—", "—", "—"});
+    }
+    return t;
+}
+
 Table make_fills_table(const HotResult& r) {
     Table t;
     t.format().font_style({tabulate::FontStyle::bold});
@@ -78,6 +100,7 @@ std::string format_cli_display(MatchingEngine& engine, const DisplayContext& ctx
     const bool show_all = ctx.show_all_levels;
     const bool is_query_top = ctx.command == "query" && ctx.query_type == "top";
     const bool is_query_full = ctx.command == "query" && ctx.query_type == "full";
+    const bool is_query_events = ctx.command == "query" && ctx.query_type == "events";
 
     out << "\n";
     Table hdr;
@@ -87,9 +110,16 @@ std::string format_cli_display(MatchingEngine& engine, const DisplayContext& ctx
         status += " — " + json::value_to<std::string>(resp.at("error"));
     }
     hdr.add_row({"Command", ctx.command});
+    if (!ctx.symbol.empty()) {
+        hdr.add_row({"Market", ctx.symbol});
+    }
     hdr.add_row({"Status", status});
     if (resp.contains("order_id")) {
         hdr.add_row({"Order ID", std::to_string(resp.at("order_id").as_uint64())});
+    }
+    const bool book_empty = !r.has_bid && !r.has_ask;
+    if (book_empty && (ctx.command == "order" || ctx.command == "cancel")) {
+        hdr.add_row({"Book", "empty (no resting liquidity)"});
     }
     out << hdr << '\n';
 
@@ -111,17 +141,36 @@ std::string format_cli_display(MatchingEngine& engine, const DisplayContext& ctx
         out << ot << '\n';
     }
 
+    if (is_query_events) {
+        out << "\n── Market Event Stream ────────────────────────\n";
+        if (resp.contains("events")) {
+            out << make_events_table(resp.at("events").as_array()) << '\n';
+        }
+        if (resp.contains("event_seq")) {
+            out << "(last event_seq=" << resp.at("event_seq").as_uint64() << ")\n";
+        }
+        return out.str();
+    }
+
+    if (!ctx.show_book_tables) {
+        return out.str();
+    }
+
+    if (book_empty) {
+        return out.str();
+    }
+
     // Top of book = best level only (one row).
     if (!is_query_full) {
         out << "\n── Top of Book (resting) ──────────────────────\n";
         out << make_book_table(engine, 1, false) << '\n';
     }
 
-    // Book depth = all levels (or best N on normal commands).
+    // Book depth: full book, or best N (including on query top).
     if (is_query_full) {
         out << "\n── Book Depth (resting) ───────────────────────\n";
         out << make_book_table(engine, ctx.ladder_depth, true) << '\n';
-    } else if (!is_query_top) {
+    } else if (is_query_top || ctx.command == "order" || ctx.command == "cancel") {
         out << "\n── Book Depth (resting, best " << ctx.ladder_depth << ") ─────────\n";
         out << make_book_table(engine, ctx.ladder_depth, false) << '\n';
     }
