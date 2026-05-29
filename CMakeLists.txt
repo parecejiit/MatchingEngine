@@ -19,6 +19,8 @@ add_executable(matching_engine
   src/main.cpp
   src/matching_engine.cpp
   src/order_book.cpp
+  src/market_shard.cpp
+  src/market_router.cpp
   src/io_adapter.cpp
   src/cli_display.cpp
 )
@@ -46,6 +48,8 @@ add_executable(me_benchmark
   src/benchmark.cpp
   src/matching_engine.cpp
   src/order_book.cpp
+  src/market_shard.cpp
+  src/market_router.cpp
 )
 target_include_directories(me_benchmark PRIVATE include)
 target_compile_features(me_benchmark PRIVATE cxx_std_20)
@@ -64,4 +68,7 @@ set_tests_properties(determinism PROPERTIES
   ENVIRONMENT "ME_BIN=$<TARGET_FILE:matching_engine>")
 add_test(NAME market_replay
   COMMAND ${CMAKE_COMMAND} -E env INPUT_FILE=${CMAKE_SOURCE_DIR}/tests/market.txt
+          $<TARGET_FILE:matching_engine>)
+add_test(NAME multi_market_replay
+  COMMAND ${CMAKE_COMMAND} -E env INPUT_FILE=${CMAKE_SOURCE_DIR}/tests/multi_market.txt
           $<TARGET_FILE:matching_engine>)

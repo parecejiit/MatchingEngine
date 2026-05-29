@@ -120,6 +120,15 @@ fi
 assert_contains "$out" '"level":50' "level 50 on book"
 echo "OK depth_50 ($n level fields)"
 
+echo "==> multi_market"
+out=$(run "$ROOT/tests/multi_market.txt")
+assert_contains "$out" '"symbol":"BTC"' "BTC symbol in response"
+assert_contains "$out" '"symbol":"CL"' "CL symbol in response"
+assert_contains "$out" '"bid":7.5E1' "CL book unchanged after BTC match"
+assert_contains "$out" '"event_seq"' "per-market event sequence"
+assert_contains "$out" '"kind":"fill"' "event stream contains fill"
+echo "OK multi_market"
+
 echo "==> determinism (replay identity)"
 if [[ -x "$ROOT/tests/test_determinism.sh" ]]; then
   ME_BIN="$BIN" "$ROOT/tests/test_determinism.sh"

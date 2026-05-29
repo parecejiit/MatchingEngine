@@ -1,6 +1,6 @@
 #pragma once
 
-#include "matching_engine.hpp"
+#include "market_router.hpp"
 #include <boost/json.hpp>
 #include <string>
 
@@ -11,12 +11,12 @@ struct IoLineResult {
     std::string display; // tabulated summary (empty for comments / when disabled)
 };
 
-// Cold path only: JSON <-> engine. No copies into hot structures beyond parse boundary.
+// Cold path only: JSON <-> router -> per-market engine. No copies on hot path beyond parse.
 class IoAdapter {
-    MatchingEngine& engine_;
+    MarketRouter& router_;
 
 public:
-    explicit IoAdapter(MatchingEngine& engine) noexcept : engine_(engine) {}
+    explicit IoAdapter(MarketRouter& router) noexcept : router_(router) {}
 
     [[nodiscard]] IoLineResult handle_line(std::string line, bool pretty = false);
 };

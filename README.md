@@ -1,19 +1,20 @@
 # Matching Engine
 
-Single-market **continuous limit order book** (C++20) built for the Infinite Worlds exchange take-home (Part 1). One symbol, price-time priority, **deterministic** matching, and an **ultra-low-latency** hot path separated from JSON I/O.
+**Continuous limit order book** (C++20) for the Infinite Worlds exchange take-home: **Part 1** single-market matching; **Part 2** multi-market routing (BTC, CL, SILVER) with per-symbol engines, event streams, and throughput benchmarks.
 
 ---
 
 ## Table of contents
 
 1. [Assignment coverage](#assignment-coverage)
-2. [Design approach](#design-approach) — architecture, latency, determinism, data structures
-3. [Production deployment](#production-deployment-and-roadmap) — Docker, Kubernetes, prod-ready changes
-4. [Project layout](#project-layout)
-5. [Clone, dependencies, and build](#clone-and-install-dependencies)
-6. [Run tests](#run-tests)
-7. [CLI and benchmark](#cli-usage)
-8. [Contributor notes](#contributor-notes)
+2. [Part 2 — Multiple markets](#part-2--multiple-markets-and-throughput) — design analysis, implementation, benchmarks
+3. [Design approach](#design-approach) — architecture, latency, determinism, data structures
+4. [Production deployment](#production-deployment-and-roadmap) — Docker, Kubernetes, prod-ready changes
+5. [Project layout](#project-layout)
+6. [Clone, dependencies, and build](#clone-and-install-dependencies)
+7. [Run tests](#run-tests)
+8. [CLI and benchmark](#cli-usage)
+9. [Contributor notes](#contributor-notes)
 
 ---
 
@@ -34,8 +35,137 @@ Single-market **continuous limit order book** (C++20) built for the Infinite Wor
 | Partial fills (GTC maker keeps queue position) | Yes |
 | **Deterministic** fills and book state | Yes — `test_determinism.sh` (replay `cmp`, golden SHA256, 8× stress loop) |
 | Single-threaded engine + scripted CLI | Yes |
+| **Part 2:** multiple independent markets | Yes — see [Part 2](#part-2--multiple-markets-and-throughput) |
 
-**Explicitly out of scope (per brief):** authentication, persistence, recovery, collateral, multi-market sharding, HTTP/WebSocket server.
+**Still out of scope:** authentication, durable disk WAL, recovery, collateral, HTTP/WebSocket server, kernel bypass.
+
+---
+
+## Part 2 — Multiple markets and throughput
+
+Part 2 extends Part 1 without changing the hot-path matching algorithm inside `MatchingEngine`. Each listed symbol gets its **own engine instance**, **own `order_id` / `timestamp` counters**, and **own monotonic event sequence** for replay.
+
+### Design thought process
+
+**Why one engine per market (shard), not one engine for all symbols?**
+
+- Matching is inherently **sequential per instrument**: price-time priority is a total order of commands on one book.
+- Part 1 already proved **determinism** with a **single-threaded** matcher and no mutexes on the hot path. Sharing one book across symbols would add locking or a global command mux — both hurt latency and complicate replay.
+- Production exchanges colocate **one matching process (or thread) per symbol** (or per shard of symbols that never share a book). Part 2 mirrors that: `MarketRouter` → `MarketShard` → `MatchingEngine`.
+
+**Why not one thread per market yet in this repo?**
+
+- The assignment asks for the **shape** of the solution, not a full thread pool. The router API is the seam where you would attach **one bounded queue + one executor per symbol** later.
+- Serial routing in the CLI process still demonstrates **isolation** and **per-market event logs**; `me_benchmark` adds a **round-robin multi-market** latency/throughput line to show router overhead is small vs matching.
+
+**Throughput ceiling (single market)**
+
+From `me_benchmark` (hot path, no JSON):
+
+| Scenario | What it measures | Typical bottleneck |
+|----------|------------------|-------------------|
+| `single_market place+cancel` | Rest + immediate cancel | Pool alloc, id map, list splice |
+| `single_market IOC match 1 lot` | Best-level match | Level walk + one fill |
+| `single_market post-only reject` | Cross check only | Best ask/bid cache read |
+| `multi_market BTC/CL/SILVER place+cancel` | Router + 3 engines | Hash lookup on symbol + same per-market cost |
+
+**Ceiling model:** \(\text{ops/s} \approx 10^9 / \text{p50 ns per op}\). On a modern laptop Release build, shallow book, **place+cancel** is often **~0.5–2M ops/s** order-of-magnitude (machine dependent). The **bottleneck** is still **matching and book mutation** (walk makers, map probes), not the router’s `unordered_map` lookup at three symbols.
+
+**What would raise the ceiling next:** fixed binary wire format, WAL on another thread, CPU pin per shard, shallower hot structures for depth — not more JSON.
+
+### Architecture (implemented)
+
+```mermaid
+flowchart LR
+  CLI[JSON line CLI]
+  R[MarketRouter]
+  B[BTC MarketShard]
+  C[CL MarketShard]
+  S[SILVER MarketShard]
+  CLI --> R
+  R --> B
+  R --> C
+  R --> S
+  B --> E1[MatchingEngine]
+  C --> E2[MatchingEngine]
+  S --> E3[MatchingEngine]
+  B --> WAL1[In-memory events]
+  C --> WAL2[In-memory events]
+  S --> WAL3[In-memory events]
+```
+
+| Component | File | Role |
+|-----------|------|------|
+| `MarketShard` | `market_shard.hpp`, `market_shard.cpp` | Owns `MatchingEngine` + `std::vector<MarketEvent>` + `event_seq` |
+| `MarketRouter` | `market_router.hpp`, `market_router.cpp` | `symbol` → shard; lazy creation |
+| `IoAdapter` | `io_adapter.cpp` | Parses optional `"symbol"`; legacy lines without symbol behave as Part 1 |
+
+### Per-market event stream (replay)
+
+Every mutating command on a named market appends to that shard’s **in-memory WAL**:
+
+| `kind` | When |
+|--------|------|
+| `place` | After `place_order` (includes `ok`, `order_id`) |
+| `fill` | One event per fill in the hot result |
+| `cancel` | After `cancel_order` |
+| `query` | After `query_top` / `query_order` |
+
+Responses with `"symbol"` include **`event_seq`** (last seq on that market). Replay for consumers:
+
+```bash
+{"cmd": "query", "symbol": "BTC", "type": "events", "from_seq": 1, "limit": 100}
+```
+
+Production would flush the same records to disk/Kafka **in seq order** on a writer thread; the matcher only appends to a vector today.
+
+### Ordering guarantees
+
+| Scope | Guarantee |
+|-------|-----------|
+| **Within one symbol** | Total order: command order = `event_seq` order = deterministic book/fills |
+| **Across symbols** | **No** global order; BTC seq 42 and CL seq 7 are unrelated |
+| **Legacy (no `symbol`)** | Same as Part 1 single default shard key `""`; JSON omits `symbol` / `event_seq` so old tests unchanged |
+
+### CLI (Part 2)
+
+```bash
+./build/matching_engine tests/multi_market.txt
+./build/matching_engine --pretty tests/multi_market.txt
+```
+
+Example:
+
+```json
+{"cmd": "order", "symbol": "BTC", "account_id": 1, "side": "buy", "price": 50000.0, "size": 1, "tif": "GTC"}
+{"cmd": "query", "symbol": "CL", "type": "top"}
+{"cmd": "query", "symbol": "BTC", "type": "events", "from_seq": 1, "limit": 50}
+```
+
+Part 1 commands **without** `"symbol"` still work and produce the same JSON shape as before.
+
+### Benchmark (throughput)
+
+```bash
+./build/me_benchmark
+./build/me_benchmark 200000
+```
+
+Output includes **throughput=… ops/s** per scenario plus `markets_active=3` for the multi-market line.
+
+### Tests
+
+| File | Purpose |
+|------|---------|
+| `tests/multi_market.txt` | BTC / CL / SILVER isolation + event query |
+| `tests/verify_tests.sh` | Asserts symbols, CL book unchanged after BTC trade, event stream |
+
+### What we would add for production Part 2
+
+- Bounded **command queue** per shard + dedicated thread / `io_context(1)` per market  
+- **Disk WAL** + snapshot per symbol  
+- Gateway routing by `symbol` with backpressure metrics  
+- Cross-market **risk** as a separate service (not in matcher)  
 
 ---
 
@@ -580,11 +710,15 @@ matchingEngine/
 │   ├── memory_pool.hpp     # OrderPool, LevelPool, maps, OrderHandle
 │   ├── order_book.hpp      # Intrusive book
 │   ├── matching_engine.hpp # Core API + HotResult
-│   ├── io_adapter.hpp      # JSON ↔ engine
+│   ├── market_shard.hpp    # Per-symbol engine + event log
+│   ├── market_router.hpp   # symbol → shard
+│   ├── io_adapter.hpp      # JSON ↔ router
 │   └── cli_display.hpp     # tabulate output
 ├── src/
 │   ├── matching_engine.cpp
 │   ├── order_book.cpp
+│   ├── market_shard.cpp
+│   ├── market_router.cpp
 │   ├── io_adapter.cpp
 │   ├── cli_display.cpp
 │   ├── main.cpp
@@ -674,6 +808,7 @@ cd build && ctest --output-on-failure
 | `cancel_edge.txt` | Cancel partial remainder, unknown id |
 | `market.txt` | Market buy/sell |
 | `cancel_during_match.txt` | Cancel after partial fill |
+| `multi_market.txt` | Part 2: BTC / CL / SILVER + event stream |
 | `depth_10.txt` / `depth_20.txt` / `depth_50.txt` | Multi-level book |
 
 ```bash
@@ -730,7 +865,8 @@ Tests use plain JSON (no `--pretty`).
 - **Limit:** include `"price"`.  
 - **Market:** omit `price` or `"price": null`.  
 - **`tif`:** `"GTC"` or `"IOC"`.  
-- **`side`:** `"buy"` or `"sell"`.
+- **`side`:** `"buy"` or `"sell"`.  
+- **`symbol`:** (Part 2) `"BTC"`, `"CL"`, `"SILVER"`, etc. — omit for Part 1–compatible single book.
 
 Responses include `ok`, `fills`, `book`, and often `bid_levels` / `ask_levels` (objects with `level`, `price`, `size`, `orders`). `query full` returns `bids` and `asks` arrays.
 

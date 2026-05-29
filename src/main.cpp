@@ -1,5 +1,5 @@
 #include "io_adapter.hpp"
-#include "matching_engine.hpp"
+#include "market_router.hpp"
 
 #include <boost/asio.hpp>
 #include <cstdlib>
@@ -14,8 +14,8 @@ static bool env_pretty_enabled() {
     return e != nullptr && e[0] != '\0' && e[0] != '0';
 }
 
-static void run_sync_replay(me::MatchingEngine& engine, std::istream& in, bool pretty) {
-    me::IoAdapter adapter(engine);
+static void run_sync_replay(me::MarketRouter& router, std::istream& in, bool pretty) {
+    me::IoAdapter adapter(router);
     std::string line;
     while (std::getline(in, line)) {
         me::IoLineResult res = adapter.handle_line(std::move(line), pretty);
@@ -26,8 +26,8 @@ static void run_sync_replay(me::MatchingEngine& engine, std::istream& in, bool p
     }
 }
 
-static void run_async_stdin(asio::io_context& ctx, me::MatchingEngine& engine, bool pretty) {
-    auto adapter = std::make_shared<me::IoAdapter>(engine);
+static void run_async_stdin(asio::io_context& ctx, me::MarketRouter& router, bool pretty) {
+    auto adapter = std::make_shared<me::IoAdapter>(router);
     auto in = std::make_shared<asio::posix::stream_descriptor>(ctx, ::dup(STDIN_FILENO));
     auto buf = std::make_shared<asio::streambuf>();
 
@@ -64,7 +64,8 @@ static bool parse_pretty_flag(int argc, char* argv[], int& file_arg_index) {
             std::cerr << "Usage: matching_engine [--pretty|-p] [replay.txt]\n"
                       << "  --pretty / -p     tabulated book + fills (stdout)\n"
                       << "  --json            JSON lines only (default for tests)\n"
-                      << "  MATCHING_ENGINE_PRETTY=1  enable pretty mode\n";
+                      << "  MATCHING_ENGINE_PRETTY=1  enable pretty mode\n"
+                      << "  Part 2: include \"symbol\" (BTC, CL, SILVER) for multi-market routing\n";
             std::exit(0);
         } else if (a[0] != '-') {
             file_arg_index = i;
@@ -74,7 +75,7 @@ static bool parse_pretty_flag(int argc, char* argv[], int& file_arg_index) {
 }
 
 int main(int argc, char* argv[]) {
-    me::MatchingEngine engine;
+    me::MarketRouter router;
     asio::io_context ctx{1};
 
     int file_arg = -1;
@@ -86,19 +87,19 @@ int main(int argc, char* argv[]) {
             std::cerr << "Cannot open " << argv[file_arg] << '\n';
             return 1;
         }
-        run_sync_replay(engine, file, pretty);
+        run_sync_replay(router, file, pretty);
         return 0;
     }
 
     const char* input_file = std::getenv("INPUT_FILE");
     if (input_file != nullptr) {
         std::ifstream file(input_file);
-        run_sync_replay(engine, file, pretty);
+        run_sync_replay(router, file, pretty);
         return 0;
     }
 
-    std::cerr << "Matching Engine (JSON lines). Use --pretty for tables. Ctrl+D to exit.\n";
-    run_async_stdin(ctx, engine, pretty);
+    std::cerr << "Matching Engine (JSON lines, multi-market). Use --pretty for tables. Ctrl+D to exit.\n";
+    run_async_stdin(ctx, router, pretty);
     ctx.run();
     return 0;
 }
